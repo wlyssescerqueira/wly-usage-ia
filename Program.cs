@@ -126,6 +126,7 @@ internal sealed class Island : Window
         root.Children.Add(details);
         agents.ColumnDefinitions.Add(new()); agents.ColumnDefinitions.Add(new());
         if (!preview) { claudeState.Text = "Lendo dados locais…"; codexState.Text = "Lendo dados locais…"; }
+        else codexState.Text = "Sem atividade recente";
         var left = Agent("Claude", preview ? "Conta A" : "Local", claudeState, preview ? 64 : null, preview ? 89 : null, preview ? "Renova em 37 min" : "Sem coleta");
         var right = Agent("Codex", preview ? "Plus" : "Local", codexState, preview ? 49 : null, preview ? 8 : null, preview ? "Renova em 1h22" : "Sem coleta");
         UpdateMatrix();
@@ -277,7 +278,11 @@ internal sealed class Island : Window
         status.MaxWidth = 135;
         status.Margin = new Thickness(8, 0, 0, 0);
         status.SetBinding(ToolTipProperty, new System.Windows.Data.Binding("Text") { Source = status });
-        DockPanel.SetDock(status, Dock.Right); heading.Children.Add(status);
+        var activity = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        var character = new ActivityCharacter();
+        character.SetBinding(ActivityCharacter.StatusProperty, new System.Windows.Data.Binding("Text") { Source = status });
+        activity.Children.Add(character); activity.Children.Add(status);
+        DockPanel.SetDock(activity, Dock.Right); heading.Children.Add(activity);
         var identity = new StackPanel { Orientation = Orientation.Horizontal };
         AttachDrag(identity);
         identity.Children.Add(Text(name, 12, true));
