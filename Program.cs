@@ -23,15 +23,31 @@ internal static class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        if (args.Contains("--smart-check"))
+        {
+            QuietPlacement.Verify(); DodgePlacement.Verify();
+            var bounds = Forms.Screen.PrimaryScreen!.WorkingArea;
+            var screen = new Rect(bounds.X, bounds.Y, bounds.Width, bounds.Height);
+            var cursor = Forms.Cursor.Position;
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            var selected = QuietPlacement.CaptureAndChoose(screen, new Rect(screen.Left, screen.Top, 680, 76), new Point(cursor.X, cursor.Y), bounds);
+            Directory.CreateDirectory("artifacts");
+            File.WriteAllText("artifacts/smart-check.json", JsonSerializer.Serialize(new { passed = true, selectedEmptyRegion = selected.HasValue, milliseconds = watch.ElapsedMilliseconds })); return;
+        }
+        if (args.Contains("--dodge-check"))
+        {
+            DodgePlacement.Verify(); Directory.CreateDirectory("artifacts");
+            File.WriteAllText("artifacts/dodge-check.json", "{\"passed\":true,\"scenarios\":4}"); return;
+        }
         if (args.Contains("--live-check"))
         {
             Directory.CreateDirectory("artifacts");
             File.WriteAllText("artifacts/live-check.json", JsonSerializer.Serialize(LocalUsage.Read())); return;
         }
-        using var singleton = new System.Threading.Mutex(true, args.Contains("--preview") ? "WlyUsage.Preview" : "WlyUsage.Prototype", out bool first);
+        using var singleton = new System.Threading.Mutex(true, args.Contains("--preview") || args.Contains("--live-preview") ? "WlyUsage.Preview" : "WlyUsage.Prototype", out bool first);
         if (!first) return;
         var app = new Application { ShutdownMode = ShutdownMode.OnMainWindowClose };
-        app.Run(new Island(args.Contains("--preview"), args.Contains("--privacy-check")));
+        app.Run(new Island(args.Contains("--preview"), args.Contains("--privacy-check"), args.Contains("--live-preview")));
     }
 }
 
@@ -41,6 +57,8 @@ internal sealed class Preferences
     public double Top { get; set; } = 12;
     public bool Pinned { get; set; }
     public bool PresentationMode { get; set; }
+    public bool DodgeMouse { get; set; } = true;
+    public bool SmartPlacement { get; set; } = true;
 }
 
 internal sealed class Island : Window
@@ -54,7 +72,6 @@ internal sealed class Island : Window
     private readonly TextBlock claudeState = Text("Trabalhando · wly-contas", 12), codexState = Text("Disponível", 12);
     private readonly TextBlock summary = Text("Claude trabalhando", 12);
     private readonly DispatcherTimer fade = new() { Interval = TimeSpan.FromSeconds(4) };
-    private readonly DispatcherTimer demo = new() { Interval = TimeSpan.FromSeconds(18) };
     private readonly DispatcherTimer pointer = new() { Interval = TimeSpan.FromMilliseconds(100) };
     private readonly Forms.NotifyIcon tray;
     private readonly System.Drawing.Icon trayIcon;
@@ -63,13 +80,15 @@ internal sealed class Island : Window
     private readonly Button pin;
     private readonly Button hideButton;
     private readonly bool preview;
-    private bool hovering, expanded = true, dragging, quiet;
+    private bool hovering, expanded = true, dragging;
     private bool manuallyHidden;
     private int phase;
     private nint handle;
     private string? saveError;
+    private DateTimeOffset lastDodge = DateTimeOffset.MinValue;
+    private bool analyzingScreen;
 
-    public Island(bool preview, bool privacyCheck = false)
+    public Island(bool preview, bool privacyCheck = false, bool livePreview = false)
     {
         this.preview = preview;
         preferences = ReadPreferences();
@@ -108,14 +127,14 @@ internal sealed class Island : Window
         left.Margin = new Thickness(0, 0, 4, 0); right.Margin = new Thickness(4, 0, 0, 0);
         Grid.SetColumn(right, 1); agents.Children.Add(left); agents.Children.Add(right); details.Children.Add(agents);
         UpdateControls();
-        MouseEnter += (_, _) => { hovering = true; Expand(); fade.Stop(); UpdateControls(); };
+        MouseEnter += (_, _) => { if (TryDodge()) return; hovering = true; Expand(); fade.Stop(); UpdateControls(); };
         MouseLeave += (_, _) => { hovering = false; UpdateControls(); fade.Stop(); fade.Start(); };
         IsKeyboardFocusWithinChanged += (_, _) => UpdateControls();
         ContextMenu = BuildMenu();
         using (var iconStream = typeof(Island).Assembly.GetManifestResourceStream("WlyUsage.Assets.usage.ico")!)
             trayIcon = new System.Drawing.Icon(iconStream, new System.Drawing.Size(32, 32));
         Icon = Imaging.CreateBitmapSourceFromHIcon(trayIcon.Handle, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
-        tray = new Forms.NotifyIcon { Icon = trayIcon, Text = "WLY Usage · demonstração", Visible = !preview };
+        tray = new Forms.NotifyIcon { Icon = trayIcon, Text = "WLY Usage · dados locais", Visible = !preview && !livePreview };
         var trayMenu = new Forms.ContextMenuStrip();
         trayMenu.Items.Add("Mostrar painel / encerrar apresentação", null, (_, _) => Dispatcher.Invoke(ShowManually));
         var presentationItem = new Forms.ToolStripMenuItem("Modo apresentação") { CheckOnClick = false };
@@ -157,6 +176,13 @@ internal sealed class Island : Window
                 preferences.PresentationMode = originalPresentation;
                 Close(); return;
             }
+            if (livePreview)
+            {
+                RefreshLive();
+                var capture = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+                capture.Tick += (_, _) => { capture.Stop(); ExportPreview("preview-live.png"); Close(); };
+                capture.Start(); return;
+            }
             if (preview)
             {
                 var capture = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(750) };
@@ -172,17 +198,17 @@ internal sealed class Island : Window
             fade.Start(); live.Start(); RefreshLive(); pointer.Start();
         };
         fade.Tick += (_, _) => { fade.Stop(); if (!preferences.Pinned && !hovering && !dragging) Collapse(); };
-        demo.Tick += (_, _) => { if (!quiet) NextPhase(); };
         live.Tick += (_, _) => RefreshLive();
         pointer.Tick += (_, _) =>
         {
+            if (TryDodge()) return;
             var p = Forms.Cursor.Position; var transform = PresentationSource.FromVisual(this)?.CompositionTarget?.TransformFromDevice ?? Matrix.Identity;
             var dip = transform.Transform(new Point(p.X, p.Y));
             bool inside = IsVisible && dip.X >= Left && dip.X <= Left + ActualWidth && dip.Y >= Top && dip.Y <= Top + ActualHeight;
             if (inside == hovering) return; hovering = inside; UpdateControls();
             if (inside) { SetTransparent(false); Expand(); fade.Stop(); } else { fade.Stop(); fade.Start(); }
         };
-        Closed += (_, _) => { closing = true; fade.Stop(); demo.Stop(); live.Stop(); pointer.Stop(); tray.Dispose(); trayIcon.Dispose(); if (!preview) Save(); };
+        Closed += (_, _) => { closing = true; fade.Stop(); live.Stop(); pointer.Stop(); tray.Dispose(); trayIcon.Dispose(); if (!preview) Save(); };
         PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) { preferences.Pinned = false; UpdatePin(); Collapse(true); } };
     }
 
@@ -230,6 +256,7 @@ internal sealed class Island : Window
     }
     private Border Agent(string name, string account, TextBlock status, int? five, int? week, string reset)
     {
+        if (status.Parent is Panel previousParent) previousParent.Children.Remove(status);
         var layout = new DockPanel();
         var icon = AgentIcon(name); icon.VerticalAlignment = VerticalAlignment.Center;
         AttachDrag(icon);
@@ -258,12 +285,65 @@ internal sealed class Island : Window
         target.Cursor = Cursors.SizeAll;
         target.MouseLeftButtonDown += (_, e) =>
         {
+            if (preferences.DodgeMouse && !ControlHeld()) return;
             if (e.ClickCount == 2) { TogglePin(); return; }
             dragging = true; SetTransparent(false);
             try { DragMove(); }
             catch (InvalidOperationException) { }
             finally { dragging = false; ClampToScreen(); Save(); }
         };
+    }
+    private static bool ControlHeld() => (GetAsyncKeyState(0x11) & 0x8000) != 0;
+    private bool TryDodge()
+    {
+        if (preview || closing || !IsVisible || !preferences.DodgeMouse || ControlHeld() || dragging || ContextMenu?.IsOpen == true) return false;
+        var cursor = Forms.Cursor.Position;
+        var point = PointFromScreen(new Point(cursor.X, cursor.Y));
+        var localArea = new Rect(-16, -16, ActualWidth + 32, ActualHeight + 32);
+        if (!localArea.Contains(point)) return false;
+        // Nunca captura o clique que se destinava à janela de baixo.
+        SetTransparent(true);
+        if (analyzingScreen) return true;
+        if ((DateTimeOffset.UtcNow - lastDodge).TotalMilliseconds < 600) return true;
+        var current = new Rect(Left, Top, ActualWidth, ActualHeight);
+        var mouse = new Point(Left + point.X, Top + point.Y);
+        if (preferences.SmartPlacement)
+        {
+            FindQuietPosition(current, mouse); return true;
+        }
+        MoveAside(DodgePlacement.Choose(WorkArea(), current, mouse));
+        return true;
+    }
+    private async void FindQuietPosition(Rect panel, Point mouse)
+    {
+        analyzingScreen = true; lastDodge = DateTimeOffset.UtcNow;
+        var area = WorkArea();
+        var pixels = Forms.Screen.FromHandle(handle).WorkingArea;
+        try
+        {
+            var destination = await System.Threading.Tasks.Task.Run(() => QuietPlacement.CaptureAndChoose(area, panel, mouse, pixels));
+            if (closing || !IsVisible || ControlHeld() || dragging || !preferences.DodgeMouse || ContextMenu?.IsOpen == true) return;
+            if (!preferences.SmartPlacement) destination = null;
+            // Revalida com a posição atual do mouse: ele pode ter andado durante a análise.
+            var cursor = Forms.Cursor.Position;
+            var local = PointFromScreen(new Point(cursor.X, cursor.Y));
+            var currentMouse = new Point(Left + local.X, Top + local.Y);
+            if (destination is { } point)
+            {
+                var safety = new Rect(point, panel.Size); safety.Inflate(64, 64);
+                if (safety.Contains(currentMouse)) destination = null;
+            }
+            MoveAside(destination ?? DodgePlacement.Choose(area, panel, currentMouse));
+        }
+        finally { analyzingScreen = false; }
+    }
+    private void MoveAside(Point? destination)
+    {
+        if (destination is { } target)
+        {
+            Left = target.X; Top = target.Y; lastDodge = DateTimeOffset.UtcNow;
+            hovering = false; UpdateControls(); fade.Stop(); fade.Start();
+        }
     }
     private void UpdateControls()
     {
@@ -286,7 +366,7 @@ internal sealed class Island : Window
         var fill = Brush(value >= 85 ? "#e58c98" : value >= 60 ? "#e9b975" : "#82c8ac");
         var caption = Text(label, 10); caption.Width = 40; panel.Children.Add(caption);
         var track = new System.Windows.Controls.Primitives.UniformGrid { Rows = 1, Columns = 28, Height = 8, Width = 110, VerticalAlignment = VerticalAlignment.Center };
-        System.Windows.Automation.AutomationProperties.SetName(track, $"{label}: {value}% consumido");
+        System.Windows.Automation.AutomationProperties.SetName(track, value.HasValue ? $"{label}: {value}% consumido" : $"{label}: sem dados");
         for (int i = 0; i < 28; i++)
         {
             double fraction = Math.Clamp((value ?? 0) / 100d * 28 - i, 0, 1);
@@ -338,7 +418,7 @@ internal sealed class Island : Window
             _ => ("Trabalhando · wly-contas", "Disponível", "Claude trabalhando")
         };
         UpdateMatrix();
-        if (!quiet) Reveal();
+        Reveal();
     }
     private void UpdateMatrix()
     {
@@ -370,7 +450,7 @@ internal sealed class Island : Window
                 Grid.SetColumn(card, index); agents.Children.Add(card);
             }
             UpdateMatrix();
-            if (!wasWorking && readings.Any(entry => entry.Working)) Reveal();
+            if (wasWorking != readings.Any(entry => entry.Working)) Reveal();
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException) { claudeState.Text = codexState.Text = "Fonte indisponível"; }
         finally { reading = false; }
@@ -415,6 +495,8 @@ internal sealed class Island : Window
         Item(preferences.Pinned ? "Desafixar painel" : "Fixar painel", TogglePin);
         Item(preferences.PresentationMode ? "Encerrar modo apresentação" : "Modo apresentação · ocultar até voltar", TogglePresentation);
         Item("Atualizar dados locais", RefreshLive);
+        Item(preferences.DodgeMouse ? "Desativar desvio do mouse" : "Ativar desvio do mouse · Ctrl para interagir", () => { preferences.DodgeMouse = !preferences.DodgeMouse; Save(); });
+        Item(preferences.SmartPlacement ? "Desativar posicionamento inteligente (experimental)" : "Ativar posicionamento inteligente (experimental)", () => { preferences.SmartPlacement = !preferences.SmartPlacement; Save(); });
         menu.Items.Add(new Separator());
         Item("Topo · esquerda", () => Snap(0)); Item("Topo · centro", () => Snap(.5)); Item("Topo · direita", () => Snap(1));
         foreach (var screen in Forms.Screen.AllScreens) { var target = screen; Item("Mover para " + screen.DeviceName, () => { var dpi = VisualTreeHelper.GetDpi(this); Left = target.WorkingArea.Left / dpi.DpiScaleX + 16; Top = target.WorkingArea.Top / dpi.DpiScaleY + 12; ClampToScreen(); Save(); Reveal(); }); }
@@ -452,5 +534,7 @@ internal sealed class Island : Window
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetWindowDisplayAffinity(nint hwnd, out uint affinity);
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int virtualKey);
 }
 

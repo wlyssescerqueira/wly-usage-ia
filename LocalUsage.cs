@@ -17,7 +17,10 @@ internal static class LocalUsage
     private static DateTimeOffset? Date(JsonElement value)
     {
         if (value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out long epoch))
-            return epoch > 100000000000 ? DateTimeOffset.FromUnixTimeMilliseconds(epoch) : DateTimeOffset.FromUnixTimeSeconds(epoch);
+        {
+            try { return epoch > 100000000000 ? DateTimeOffset.FromUnixTimeMilliseconds(epoch) : DateTimeOffset.FromUnixTimeSeconds(epoch); }
+            catch (ArgumentOutOfRangeException) { return null; }
+        }
         return value.ValueKind == JsonValueKind.String && DateTimeOffset.TryParse(value.GetString(), out var date) ? date : null;
     }
     private static UsageWindow? Window(JsonElement root, string percent, string reset)
