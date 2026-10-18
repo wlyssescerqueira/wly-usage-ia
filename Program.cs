@@ -44,10 +44,10 @@ internal static class Program
             Directory.CreateDirectory("artifacts");
             File.WriteAllText("artifacts/live-check.json", JsonSerializer.Serialize(LocalUsage.Read())); return;
         }
-        using var singleton = new System.Threading.Mutex(true, args.Contains("--preview") || args.Contains("--live-preview") ? "WlyUsage.Preview" : "WlyUsage.Prototype", out bool first);
+        using var singleton = new System.Threading.Mutex(true, args.Contains("--preview") || args.Contains("--live-preview") || args.Contains("--snapshot-check") ? "WlyUsage.Preview" : "WlyUsage.Prototype", out bool first);
         if (!first) return;
         var app = new Application { ShutdownMode = ShutdownMode.OnMainWindowClose };
-        app.Run(new Island(args.Contains("--preview"), args.Contains("--privacy-check"), args.Contains("--live-preview")));
+        app.Run(new Island(args.Contains("--preview"), args.Contains("--privacy-check"), args.Contains("--live-preview") || args.Contains("--snapshot-check"), args.Contains("--snapshot-check")));
     }
 }
 
@@ -59,6 +59,8 @@ internal sealed class Preferences
     public bool PresentationMode { get; set; }
     public bool DodgeMouse { get; set; } = true;
     public bool SmartPlacement { get; set; } = true;
+    public bool AllowCapture { get; set; }
+    public bool AllowCaptureWhileSnipping { get; set; } = true;
 }
 
 internal sealed class Island : Window
@@ -87,13 +89,16 @@ internal sealed class Island : Window
     private string? saveError;
     private DateTimeOffset lastDodge = DateTimeOffset.MinValue;
     private bool analyzingScreen;
+    private bool snippingOpen;
+    private uint? appliedAffinity;
+    private int pointerTicks;
 
-    public Island(bool preview, bool privacyCheck = false, bool livePreview = false)
+    public Island(bool preview, bool privacyCheck = false, bool livePreview = false, bool snapshotCheck = false)
     {
         this.preview = preview;
         preferences = ReadPreferences();
         Title = "WLY Usage · protótipo";
-        Width = 680; SizeToContent = SizeToContent.Height;
+        SizeToContent = SizeToContent.WidthAndHeight;
         WindowStyle = WindowStyle.None; ResizeMode = ResizeMode.NoResize;
         AllowsTransparency = false; Background = Brush("#181b23");
         System.Windows.Shell.WindowChrome.SetWindowChrome(this, new System.Windows.Shell.WindowChrome
@@ -141,6 +146,11 @@ internal sealed class Island : Window
         presentationItem.Click += (_, _) => Dispatcher.Invoke(TogglePresentation);
         trayMenu.Items.Add(presentationItem);
         trayMenu.Opening += (_, _) => presentationItem.Checked = preferences.PresentationMode;
+        trayMenu.Items.Add("Copiar print da faixa", null, (_, _) => Dispatcher.Invoke(CopySnapshot));
+        var captureItem = new Forms.ToolStripMenuItem("Permitir capturas de tela") { CheckOnClick = false };
+        captureItem.Click += (_, _) => Dispatcher.Invoke(ToggleCapture);
+        trayMenu.Items.Add(captureItem);
+        trayMenu.Opening += (_, _) => captureItem.Checked = preferences.AllowCapture;
         trayMenu.Items.Add("Atualizar dados", null, (_, _) => Dispatcher.Invoke(RefreshLive));
         trayMenu.Items.Add("Sair", null, (_, _) => Dispatcher.Invoke(Close));
         tray.ContextMenuStrip = trayMenu; tray.MouseClick += (_, e) => { if (e.Button == Forms.MouseButtons.Left) Dispatcher.Invoke(ShowManually); };
@@ -148,18 +158,15 @@ internal sealed class Island : Window
         {
             handle = new WindowInteropHelper(this).Handle;
             SetWindowLong(handle, -20, GetWindowLong(handle, -20) | 0x08000000 | 0x80);
-            bool protectedCapture = SetWindowDisplayAffinity(handle, 0x11);
-            tray.Text = protectedCapture ? "WLY Usage · exclusão de captura ativa" : "WLY Usage · exclusão de captura indisponível";
+            ApplyCaptureProtection();
         };
         Loaded += (_, _) =>
         {
             handle = new WindowInteropHelper(this).EnsureHandle();
             SetWindowLong(handle, -20, GetWindowLong(handle, -20) | 0x08000000 | 0x80);
-            Left = double.IsFinite(preferences.Left) ? preferences.Left : SystemParameters.WorkArea.Left + (SystemParameters.WorkArea.Width - Width) / 2;
+            Left = double.IsFinite(preferences.Left) ? preferences.Left : SystemParameters.WorkArea.Left + (SystemParameters.WorkArea.Width - ActualWidth) / 2;
             Top = preferences.Top; ClampToScreen(); UpdatePin();
-            bool captureApplied = SetWindowDisplayAffinity(handle, 0x11);
-            int captureError = captureApplied ? 0 : Marshal.GetLastWin32Error();
-            tray.Text = captureApplied ? "WLY Usage · exclusão de captura ativa" : "WLY Usage · exclusão de captura indisponível";
+            int captureError = ApplyCaptureProtection();
             if (privacyCheck)
             {
                 bool originalPresentation = preferences.PresentationMode;
@@ -180,7 +187,7 @@ internal sealed class Island : Window
             {
                 RefreshLive();
                 var capture = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
-                capture.Tick += (_, _) => { capture.Stop(); ExportPreview("preview-live.png"); Close(); };
+                capture.Tick += (_, _) => { capture.Stop(); if (snapshotCheck) CopySnapshot(); else ExportPreview("preview-live.png"); Close(); };
                 capture.Start(); return;
             }
             if (preview)
@@ -201,6 +208,7 @@ internal sealed class Island : Window
         live.Tick += (_, _) => RefreshLive();
         pointer.Tick += (_, _) =>
         {
+            if (++pointerTicks % 3 == 0) CheckSnipping();
             if (TryDodge()) return;
             var p = Forms.Cursor.Position; var transform = PresentationSource.FromVisual(this)?.CompositionTarget?.TransformFromDevice ?? Matrix.Identity;
             var dip = transform.Transform(new Point(p.X, p.Y));
@@ -278,7 +286,7 @@ internal sealed class Island : Window
         panel.Children.Add(Meter("5h", five, reset.Replace("Renova em ", "↻ ")));
         panel.Children.Add(Meter("Semana", week));
         layout.Children.Add(panel);
-        return new Border { Background = Brush("#b820242f"), BorderBrush = Brush("#2b3040"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(8), Child = layout, ToolTip = reset };
+        return new Border { Background = Brush("#b820242f"), BorderBrush = Brush("#2b3040"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(6), Child = layout, ToolTip = reset };
     }
     private void AttachDrag(FrameworkElement target)
     {
@@ -362,23 +370,23 @@ internal sealed class Island : Window
     }
     private static StackPanel Meter(string label, int? value, string renewal = "")
     {
-        var panel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 0) };
+        var panel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 3, 0, 0) };
         var fill = Brush(value >= 85 ? "#e58c98" : value >= 60 ? "#e9b975" : "#82c8ac");
         var caption = Text(label, 10); caption.Width = 40; panel.Children.Add(caption);
-        var track = new System.Windows.Controls.Primitives.UniformGrid { Rows = 1, Columns = 28, Height = 8, Width = 110, VerticalAlignment = VerticalAlignment.Center };
+        var track = new System.Windows.Controls.Primitives.UniformGrid { Rows = 1, Columns = 20, Height = 5, Width = 80, VerticalAlignment = VerticalAlignment.Center };
         System.Windows.Automation.AutomationProperties.SetName(track, value.HasValue ? $"{label}: {value}% consumido" : $"{label}: sem dados");
-        for (int i = 0; i < 28; i++)
+        for (int i = 0; i < 20; i++)
         {
-            double fraction = Math.Clamp((value ?? 0) / 100d * 28 - i, 0, 1);
-            var segment = new Grid { Background = Wash, Margin = new Thickness(0, 0, i == 27 ? 0 : 2, 0) };
+            double fraction = Math.Clamp((value ?? 0) / 100d * 20 - i, 0, 1);
+            var segment = new Grid { Background = Wash, Margin = new Thickness(0, 0, i == 19 ? 0 : 1.5, 0) };
             segment.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(fraction, GridUnitType.Star) });
             segment.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1 - fraction, GridUnitType.Star) });
             if (fraction > 0) segment.Children.Add(new Border { Background = fill });
             track.Children.Add(segment);
         }
         panel.Children.Add(track);
-        var percent = Text(value.HasValue ? $"{value}%" : "—", 10, true); percent.Foreground = value.HasValue ? fill : Muted; percent.Width = 32; percent.TextAlignment = TextAlignment.Right; panel.Children.Add(percent);
-        var reset = Text(renewal, 10); reset.Margin = new Thickness(8, 0, 0, 0); panel.Children.Add(reset);
+        var percent = Text(value.HasValue ? $"{value}%" : "—", 10, true); percent.Foreground = value.HasValue ? fill : Muted; percent.Width = 28; percent.TextAlignment = TextAlignment.Right; panel.Children.Add(percent);
+        var reset = Text(renewal, 10); reset.Margin = new Thickness(6, 0, 0, 0); panel.Children.Add(reset);
         return panel;
     }
     private void AnimateOpacity(double value) => BeginAnimation(OpacityProperty, new DoubleAnimation(value, TimeSpan.FromMilliseconds(350)));
@@ -439,7 +447,7 @@ internal sealed class Island : Window
                 var status = index == 0 ? claudeState : codexState;
                 status.Text = entry.Activity;
                 bool stale = entry.Collected < DateTimeOffset.UtcNow.AddMinutes(-30);
-                string renewal = entry.Five?.Reset is { } reset ? "Renova em " + FormatRemaining(reset) : "Sem coleta 5h";
+                string renewal = entry.Five?.Reset is { } reset ? "Renova em " + FormatRemaining(reset) : entry.Five != null ? "Renovado" : "Sem coleta 5h";
                 var card = Agent(entry.Name, stale ? "desatualizado" : entry.Account, status,
                     entry.Five is { } five ? (int)Math.Round(five.Used) : null,
                     entry.Week is { } week ? (int)Math.Round(week.Used) : null, renewal);
@@ -497,6 +505,9 @@ internal sealed class Island : Window
         Item("Atualizar dados locais", RefreshLive);
         Item(preferences.DodgeMouse ? "Desativar desvio do mouse" : "Ativar desvio do mouse · Ctrl para interagir", () => { preferences.DodgeMouse = !preferences.DodgeMouse; Save(); });
         Item(preferences.SmartPlacement ? "Desativar posicionamento inteligente (experimental)" : "Ativar posicionamento inteligente (experimental)", () => { preferences.SmartPlacement = !preferences.SmartPlacement; Save(); });
+        Item("Copiar print da faixa", CopySnapshot);
+        Item(preferences.AllowCapture ? "Proteger contra capturas de tela (calls)" : "Permitir capturas de tela", ToggleCapture);
+        Item(preferences.AllowCaptureWhileSnipping ? "Não aparecer na Ferramenta de Captura" : "Aparecer na Ferramenta de Captura", () => { preferences.AllowCaptureWhileSnipping = !preferences.AllowCaptureWhileSnipping; ApplyCaptureProtection(); Save(); });
         menu.Items.Add(new Separator());
         Item("Topo · esquerda", () => Snap(0)); Item("Topo · centro", () => Snap(.5)); Item("Topo · direita", () => Snap(1));
         foreach (var screen in Forms.Screen.AllScreens) { var target = screen; Item("Mover para " + screen.DeviceName, () => { var dpi = VisualTreeHelper.GetDpi(this); Left = target.WorkingArea.Left / dpi.DpiScaleX + 16; Top = target.WorkingArea.Top / dpi.DpiScaleY + 12; ClampToScreen(); Save(); Reveal(); }); }
@@ -511,8 +522,8 @@ internal sealed class Island : Window
         var dpi = VisualTreeHelper.GetDpi(this); var screen = Forms.Screen.FromHandle(handle).WorkingArea;
         return new Rect(screen.Left / dpi.DpiScaleX, screen.Top / dpi.DpiScaleY, screen.Width / dpi.DpiScaleX, screen.Height / dpi.DpiScaleY);
     }
-    private void Snap(double alignment) { var area = WorkArea(); Left = area.Left + 16 + Math.Max(0, area.Width - Width - 32) * alignment; Top = area.Top + 12; Save(); Reveal(); }
-    private void ClampToScreen() { var area = WorkArea(); Left = Math.Clamp(Left, area.Left, Math.Max(area.Left, area.Right - Width)); Top = Math.Clamp(Top, area.Top, Math.Max(area.Top, area.Bottom - (expanded ? 300 : ActualHeight))); }
+    private void Snap(double alignment) { var area = WorkArea(); Left = area.Left + 16 + Math.Max(0, area.Width - ActualWidth - 32) * alignment; Top = area.Top + 12; Save(); Reveal(); }
+    private void ClampToScreen() { var area = WorkArea(); Left = Math.Clamp(Left, area.Left, Math.Max(area.Left, area.Right - ActualWidth)); Top = Math.Clamp(Top, area.Top, Math.Max(area.Top, area.Bottom - (expanded ? 300 : ActualHeight))); }
     private Preferences ReadPreferences() { try { return File.Exists(settingsPath) ? JsonSerializer.Deserialize<Preferences>(File.ReadAllText(settingsPath)) ?? new() : new(); } catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException) { return new(); } }
     private void Save()
     {
@@ -521,6 +532,55 @@ internal sealed class Island : Window
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { saveError = "Não foi possível salvar a posição."; tray.Text = "WLY Usage · " + saveError; }
     }
     private void SetTransparent(bool enabled) { if (handle != 0) { int style = GetWindowLong(handle, -20); SetWindowLong(handle, -20, enabled ? style | 0x20 : style & ~0x20); } }
+    private int ApplyCaptureProtection()
+    {
+        if (handle == 0) return 0;
+        bool allow = preferences.AllowCapture || (preferences.AllowCaptureWhileSnipping && snippingOpen);
+        uint affinity = allow ? 0u : 0x11u;
+        if (appliedAffinity == affinity) return 0;
+        bool applied = SetWindowDisplayAffinity(handle, affinity);
+        int error = applied ? 0 : Marshal.GetLastWin32Error();
+        if (applied) appliedAffinity = affinity;
+        tray.Text = preferences.AllowCapture ? "WLY Usage · capturas de tela permitidas" : allow ? "WLY Usage · captura liberada para o Recorte" : applied ? "WLY Usage · exclusão de captura ativa" : "WLY Usage · exclusão de captura indisponível";
+        return error;
+    }
+    // Enquanto a Ferramenta de Captura (ou Win+Shift+S) estiver aberta, a faixa aparece nos recortes.
+    private void CheckSnipping()
+    {
+        bool open = false;
+        foreach (var name in new[] { "SnippingTool", "ScreenClippingHost", "ScreenSketch" })
+        {
+            var found = System.Diagnostics.Process.GetProcessesByName(name);
+            foreach (var process in found) process.Dispose();
+            if (found.Length > 0) { open = true; break; }
+        }
+        if (open == snippingOpen) return;
+        snippingOpen = open; ApplyCaptureProtection();
+    }
+    private void ToggleCapture() { preferences.AllowCapture = !preferences.AllowCapture; ApplyCaptureProtection(); Save(); }
+    // Gera a imagem pela própria renderização do WPF, sem depender da captura do Windows (que exclui a faixa).
+    private void CopySnapshot()
+    {
+        try
+        {
+            Reveal(); UpdateLayout();
+            var dpi = VisualTreeHelper.GetDpi(this);
+            var bitmap = new RenderTargetBitmap((int)Math.Ceiling(ActualWidth * dpi.DpiScaleX), (int)Math.Ceiling(ActualHeight * dpi.DpiScaleY), 96 * dpi.DpiScaleX, 96 * dpi.DpiScaleY, PixelFormats.Pbgra32);
+            bitmap.Render(this); bitmap.Freeze();
+            var folder = Path.Combine(Path.GetDirectoryName(settingsPath)!, "prints");
+            Directory.CreateDirectory(folder);
+            var file = Path.Combine(folder, $"wly-usage-{DateTime.Now:yyyyMMdd-HHmmss}.png");
+            var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
+            using (var stream = File.Create(file)) encoder.Save(stream);
+            File.Copy(file, Path.Combine(folder, "ultimo.png"), true);
+            System.Windows.Clipboard.SetImage(bitmap);
+            tray.ShowBalloonTip(3000, "Print copiado", "Cole com Ctrl+V. Arquivo: " + file, Forms.ToolTipIcon.Info);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Runtime.InteropServices.COMException)
+        {
+            tray.ShowBalloonTip(3000, "Não foi possível gerar o print", e.Message, Forms.ToolTipIcon.Warning);
+        }
+    }
     private void ExportPreview(string filename = "preview.png")
     {
         UpdateLayout(); var bitmap = new RenderTargetBitmap((int)ActualWidth, (int)ActualHeight, 96, 96, PixelFormats.Pbgra32); bitmap.Render(this);

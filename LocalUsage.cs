@@ -11,7 +11,14 @@ internal sealed record AgentReading(string Name, string Account, string Activity
 internal static class LocalUsage
 {
     private static readonly string Home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-    public static AgentReading[] Read() => new[] { Claude(), Codex() };
+    public static AgentReading[] Read() => new[] { Claude(), Codex() }.Select(Limited).ToArray();
+    // Cota esgotada tem prioridade sobre a atividade: o agente não consegue trabalhar até renovar.
+    private static AgentReading Limited(AgentReading reading)
+    {
+        var blocked = new[] { reading.Five, reading.Week }.Where(window => window is { Used: >= 100, Reset: not null }).Max(window => window!.Reset);
+        return blocked is { } until ? reading with { Activity = "Limite atingido · volta " + Back(until), Working = false } : reading;
+    }
+    private static string Back(DateTimeOffset until) => until.ToLocalTime().Date == DateTime.Today ? until.ToLocalTime().ToString("HH:mm") : until.ToLocalTime().ToString("dd/MM HH:mm");
     private static JsonElement Get(JsonElement root, string key) => root.ValueKind == JsonValueKind.Object && root.TryGetProperty(key, out var value) ? value : default;
     private static string Str(JsonElement root, string key) => Get(root, key).ValueKind == JsonValueKind.String ? Get(root, key).GetString() ?? "" : "";
     private static DateTimeOffset? Date(JsonElement value)
@@ -26,7 +33,9 @@ internal static class LocalUsage
     private static UsageWindow? Window(JsonElement root, string percent, string reset)
     {
         var number = Get(root, percent); var date = Date(Get(root, reset));
-        if (number.ValueKind != JsonValueKind.Number || !number.TryGetDouble(out double used) || !double.IsFinite(used) || date <= DateTimeOffset.UtcNow) return null;
+        if (number.ValueKind != JsonValueKind.Number || !number.TryGetDouble(out double used) || !double.IsFinite(used)) return null;
+        // Janela já renovada: o consumo recomeça do zero até a próxima coleta.
+        if (date <= DateTimeOffset.UtcNow) return new(0, null);
         return new(Math.Clamp(used, 0, 100), date);
     }
     private static string[] Files(string directory, int count)
@@ -98,7 +107,9 @@ internal static class LocalUsage
                         if (type is "task_complete" or "turn_aborted") { active = false; latest = time; }
                         if (type == "token_count") { latest = time; }
                         var limits = Get(payload, "rate_limits");
-                        if (limits.ValueKind == JsonValueKind.Object && time != null && (collected == null || time > collected))
+                        // O Codex também grava limites de outros modelos (ex.: "premium") sem janelas; não podem apagar os da cota principal.
+                        bool hasWindows = Get(limits, "primary").ValueKind == JsonValueKind.Object || Get(limits, "secondary").ValueKind == JsonValueKind.Object;
+                        if (limits.ValueKind == JsonValueKind.Object && hasWindows && time != null && (collected == null || time > collected))
                         {
                             five = null; week = null;
                             foreach (string key in new[] { "primary", "secondary" })

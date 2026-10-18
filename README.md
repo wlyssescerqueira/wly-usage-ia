@@ -4,7 +4,7 @@ Protótipo local para Windows, feito em C# / WPF (.NET 9).
 
 ## Experimentar
 
-Use o atalho `Abrir WLY Usage.lnk` na raiz, que aponta para `%LOCALAPPDATA%/WlyUsage/app/WlyUsage.exe`. A instalação inicia automaticamente ao entrar no Windows. Esta é a versão horizontal sem cabeçalho (680 × aproximadamente 76 pixels), com leitura de dados locais reais a cada cinco segundos.
+Use o atalho `Abrir WLY Usage.lnk` na raiz, que aponta para `%LOCALAPPDATA%/WlyUsage/app/WlyUsage.exe`. A instalação inicia automaticamente ao entrar no Windows. Esta é a versão horizontal sem cabeçalho (cerca de 570 × 70 pixels, com largura ajustada ao conteúdo), com leitura de dados locais reais a cada cinco segundos.
 
 - Ao aproximar o mouse, o modo **posicionamento inteligente (experimental)** procura uma região visualmente uniforme no mesmo monitor, preferindo as bordas. Analisa uma captura em memória somente ao precisar desviar: sem IA, sem rede e sem salvar imagens. Usa densidade de contornos; não entende o conteúdo nem sabe onde você vai ler. Pode ser desligado no menu.
 - Se não encontrar espaço adequado ou a captura falhar, alterna para a borda oposta: topo ↔ rodapé, direita ↔ esquerda. Alternativas: topo, direita, esquerda e rodapé. Segure **Ctrl** para ela ficar parada e permitir consulta, cliques e arraste.
@@ -15,10 +15,12 @@ Use o atalho `Abrir WLY Usage.lnk` na raiz, que aponta para `%LOCALAPPDATA%/WlyU
 - Use `Ocultar` para sumir até clicar no ícone da bandeja. Novas atividades não reabrem o painel.
 - O modo apresentação, no menu e na bandeja, mantém o painel oculto inclusive ao reiniciar. Clique na bandeja para voltar e encerrar esse modo.
 - A exclusão de captura do Windows é solicitada automaticamente. O tooltip da bandeja informa se a chamada foi aceita. A compatibilidade precisa ser conferida no compartilhamento real de Teams, Meet e Zoom; isso não detecta chamadas nem o começo de um compartilhamento.
+- Por causa dessa exclusão, prints do Windows (Win+Shift+S, PrintScreen) não mostram a faixa. Use **Copiar print da faixa** (menu e bandeja): o app renderiza a própria imagem, copia para a área de transferência e salva em `%LOCALAPPDATA%\WlyUsage\prints` (`ultimo.png` é sempre o mais recente). **Permitir capturas de tela** desliga a exclusão até ser reativada.
+- Enquanto a Ferramenta de Captura estiver aberta (inclusive pelo Win+Shift+S), a exclusão é suspensa e a faixa aparece nos recortes; ao fechá-la, a proteção volta. Desligável no menu: **Não aparecer na Ferramenta de Captura**.
 - Segure **Ctrl** e use o botão direito para escolher posição, monitor ou desativar o desvio do mouse. Fixar mantém os detalhes abertos; o desvio continua ativo até ser desativado ou você segurar Ctrl.
 - A bandeja permite reabrir o painel, atualizar os dados ou sair.
 - As cotas do Codex vêm dos eventos `rate_limits` das sessões em `CODEX_HOME` ou `~/.codex/sessions`. As do Claude vêm da coleta local já configurada em `~/.habblaud/usage/.claude.json`; o Habblaud não precisa estar aberto.
-- Coletas com mais de 30 minutos são marcadas como desatualizadas. Janelas expiradas ou sem coleta aparecem com traço, nunca com um percentual inventado. Passe o mouse no bloco para consultar fonte e horário.
+- Coletas com mais de 30 minutos são marcadas como desatualizadas. Janelas já renovadas aparecem com 0% e “Renovado”; sem coleta, aparecem com traço. Com 100% numa janela, o status mostra “Limite atingido · volta HH:mm”. Do Codex só valem eventos de limite com janelas: o evento `premium` vazio que ele grava em seguida é ignorado. Passe o mouse no bloco para consultar fonte e horário.
 - A atividade é inferida dos eventos recentes das sessões locais, com limite de três minutos sem eventos. Não equivale à detecção exata de todos os agentes, contas ou sessões em WSL.
 
 Preferências: `%LOCALAPPDATA%/WlyUsage/preferences.json`.
@@ -35,6 +37,8 @@ dotnet publish -c Release -r win-x64 --self-contained true -o artifacts/app
 
 `--preview` renderiza a janela expandida em `artifacts/preview.png` e encerra.
 `--privacy-check` verifica ocultação após atividade, modo apresentação, restauração e o sinalizador de exclusão de captura, gerando `artifacts/privacy-check.json`.
+
+`--snapshot-check` lê os dados reais e executa **Copiar print da faixa**, gerando o PNG em `%LOCALAPPDATA%\WlyUsage\prints`.
 `--live-check` verifica as fontes locais e gera `artifacts/live-check.json`, sem conteúdo das conversas nem credenciais.
 `--live-preview` renderiza uma leitura real em `artifacts/preview-live.png`.
 `--dodge-check` verifica posições livres, limites do monitor, coordenadas negativas e tela menor que o painel.
