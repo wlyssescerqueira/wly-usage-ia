@@ -267,9 +267,6 @@ internal sealed class Island : Window
     {
         if (status.Parent is Panel previousParent) previousParent.Children.Remove(status);
         var layout = new DockPanel();
-        var icon = AgentIcon(name); icon.VerticalAlignment = VerticalAlignment.Center;
-        AttachDrag(icon);
-        DockPanel.SetDock(icon, Dock.Left); layout.Children.Add(icon);
         var panel = new StackPanel();
         var heading = new DockPanel();
         status.FontSize = 10;
@@ -278,11 +275,12 @@ internal sealed class Island : Window
         status.MaxWidth = 135;
         status.Margin = new Thickness(8, 0, 0, 0);
         status.SetBinding(ToolTipProperty, new System.Windows.Data.Binding("Text") { Source = status });
-        var activity = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-        var character = new ActivityCharacter();
+        var character = new ActivityCharacter { StatusLabel = status, AgentName = name };
+        AttachDrag(character);
         character.SetBinding(ActivityCharacter.StatusProperty, new System.Windows.Data.Binding("Text") { Source = status });
-        activity.Children.Add(character); activity.Children.Add(status);
-        DockPanel.SetDock(activity, Dock.Right); heading.Children.Add(activity);
+        character.SetBinding(ToolTipProperty, new System.Windows.Data.Binding("Text") { Source = status });
+        DockPanel.SetDock(character, Dock.Left); layout.Children.Add(character);
+        DockPanel.SetDock(status, Dock.Right); heading.Children.Add(status);
         var identity = new StackPanel { Orientation = Orientation.Horizontal };
         AttachDrag(identity);
         identity.Children.Add(Text(name, 12, true));
@@ -435,6 +433,11 @@ internal sealed class Island : Window
     }
     private void UpdateMatrix()
     {
+        if (!agents.Children.OfType<BuddyScene>().Any())
+        {
+            var scene = new BuddyScene(agents); Grid.SetColumnSpan(scene, 2);
+            System.Windows.Controls.Panel.SetZIndex(scene, 10); agents.Children.Add(scene);
+        }
         matrixBackground.SetWorking(claudeState.Text.StartsWith("Trabalhando", StringComparison.Ordinal) || codexState.Text.StartsWith("Trabalhando", StringComparison.Ordinal));
     }
     private async void RefreshLive()
