@@ -20,10 +20,10 @@ internal sealed class BuddyScene : FrameworkElement
     public BuddyScene(Grid agents)
     {
         this.agents = agents; IsHitTestVisible = false;
-        Loaded += (_, _) => BeginAnimation(ClockProperty, new DoubleAnimation(0, 1, TimeSpan.FromSeconds(60))
+        Loaded += (_, _) => BeginAnimation(ClockProperty, new DoubleAnimation(0, 1, TimeSpan.FromSeconds(90))
         {
             RepeatBehavior = RepeatBehavior.Forever,
-            BeginTime = TimeSpan.FromSeconds(-(DateTimeOffset.UtcNow.TimeOfDay.TotalSeconds % 60))
+            BeginTime = TimeSpan.FromSeconds(-(DateTimeOffset.UtcNow.TimeOfDay.TotalSeconds % 90))
         });
         Unloaded += (_, _) => BeginAnimation(ClockProperty, null);
     }
@@ -44,31 +44,55 @@ internal sealed class BuddyScene : FrameworkElement
         foreach (var character in characters) character.BuddyPhase = -1;
         var worker = characters.FirstOrDefault(c => c.Status.StartsWith("Trabalhando", StringComparison.Ordinal));
         var sleeper = characters.FirstOrDefault(c => c.Status == "Sem atividade recente");
-        double phase = (double)GetValue(ClockProperty) * 60 - 36;
+        double phase = (double)GetValue(ClockProperty) * 90 - 42;
         // Fixed phases make the existing --preview useful for inspecting the whole scene.
         if (Environment.GetCommandLineArgs().Contains("--preview"))
         {
             var arg = Environment.GetCommandLineArgs().FirstOrDefault(a => a.StartsWith("--buddy-phase="));
             if (arg != null && double.TryParse(arg.Split('=')[1], NumberStyles.Float, CultureInfo.InvariantCulture, out double sample)) phase = sample;
         }
-        if (worker != null && sleeper != null && phase >= 0 && phase < 22)
+        if (worker != null && sleeper != null && phase >= 0 && phase < 41)
         {
             var start = worker.TranslatePoint(new Point(30, 18), this);
             var end = sleeper.TranslatePoint(new Point(16, 24), this);
             worker.BuddyPhase = sleeper.BuddyPhase = phase;
             worker.BuddyOnRight = end.X > start.X; sleeper.BuddyOnRight = start.X > end.X;
-            if (phase >= 16 && phase < 17.5)
+            SagaEffects.Draw(drawing, worker, sleeper, this, phase);
+            if (phase >= 16 && phase < 16.95)
             {
                 // The sleeper returns a work booklet instead of another weapon.
-                double flight = (phase - 16) / 1.5;
+                double flight = Math.Min(1, (phase - 16) / .55);
                 var hand = sleeper.TranslatePoint(new Point(sleeper.BuddyOnRight ? 17 : 39, 20), this);
-                var recipient = worker.TranslatePoint(new Point(worker.BuddyOnRight ? 22 : 34, 24), this);
+                var recipient = worker.TranslatePoint(new Point(worker.BuddyOnRight ? 18 : 38, 14), this);
                 var point = new Point(hand.X + (recipient.X - hand.X) * flight,
-                    hand.Y + (recipient.Y - hand.Y) * flight - Math.Sin(flight * Math.PI) * 6);
+                    hand.Y + (recipient.Y - hand.Y) * flight);
+                if (phase >= 16.55)
+                {
+                    double bounce = (phase - 16.55) / .4;
+                    point.X += (hand.X > recipient.X ? 1 : -1) * bounce * 15;
+                    point.Y += bounce * 22;
+                }
+                else
+                {
+                    double direction = recipient.X > hand.X ? 1 : -1;
+                    for (int i = -1; i <= 1; i++)
+                        drawing.DrawLine(new Pen(ToolInk, 1), new Point(point.X - direction * 20, point.Y + i * 5),
+                            new Point(point.X - direction * 42, point.Y + i * 5));
+                }
                 drawing.PushTransform(new TranslateTransform(point.X, point.Y));
-                drawing.PushTransform(new RotateTransform(Math.Sin(flight * Math.PI * 2) * 18));
+                drawing.PushTransform(new RotateTransform((phase - 16) * 1000));
                 WorkBook.Draw(drawing, new Point(), 1, VisualTreeHelper.GetDpi(this).PixelsPerDip);
                 drawing.Pop(); drawing.Pop();
+                if (phase >= 16.55 && phase < 16.85)
+                {
+                    for (int i = 0; i < 7; i++)
+                    {
+                        double angle = i * Math.PI * 2 / 7;
+                        drawing.DrawLine(new Pen(ToolInk, 2),
+                            new Point(recipient.X + Math.Cos(angle) * 10, recipient.Y + Math.Sin(angle) * 10),
+                            new Point(recipient.X + Math.Cos(angle) * 17, recipient.Y + Math.Sin(angle) * 17));
+                    }
+                }
             }
             if (phase >= 9 && phase < 12)
             {

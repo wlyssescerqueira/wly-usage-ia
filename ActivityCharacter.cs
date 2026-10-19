@@ -8,7 +8,7 @@ using System.Windows.Media.Animation;
 
 namespace WlyUsage;
 
-internal sealed class ActivityCharacter : FrameworkElement
+internal sealed partial class ActivityCharacter : FrameworkElement
 {
     public static readonly DependencyProperty StatusProperty = DependencyProperty.Register(
         nameof(Status), typeof(string), typeof(ActivityCharacter),
@@ -97,17 +97,18 @@ internal sealed class ActivityCharacter : FrameworkElement
             if (mirror) d.PushTransform(new MatrixTransform(-1, 0, 0, 1, Width, 0));
             double scene = BuddyPhase;
             Path("M4 44 H51", new Pen(Ground, 1));
-            if (scene >= 17.5 && Status.StartsWith("Trabalhando", StringComparison.Ordinal))
+            if (scene >= 16.55 && scene < 17.5 && Status.StartsWith("Trabalhando", StringComparison.Ordinal))
             {
-                double wag = Math.Sin((scene - 17.5) * Math.PI * 3) * 3;
-                DrawHead(d, 11 + wag * .25, 6);
-                Path("M18 21 L19 32 L12 42 M19 32 L27 42 M18 26 L11 29 L9 25 M18 24 L28 27 L34 23");
-                d.PushTransform(new RotateTransform(wag * 6, 34, 24));
-                Path("M32 25 V20 Q32 18 34 19 L35 21 V12 Q36 10 37 12 V21 L40 22 V26 L36 28 Z", new Pen(Ink, 1.2), Ground);
+                double recoil = Math.Sin((scene - 16.55) / .95 * Math.PI);
+                d.PushTransform(new RotateTransform(-recoil * 30, 20, 40));
+                DrawHead(d, 11, 6);
+                Path("M18 21 L20 32 L12 42 M20 32 L28 42 M18 24 L12 17 L17 12 M20 27 L29 21 L31 14");
                 d.Pop();
-                var sigh = new FormattedText(scene < 20.5 ? "tsc tsc tsc" : "aff…", CultureInfo.InvariantCulture,
-                    FlowDirection.LeftToRight, new Typeface("Segoe UI"), 8, Accent, VisualTreeHelper.GetDpi(this).PixelsPerDip);
-                d.DrawText(sigh, new Point(3, 0));
+                if (mirror) d.Pop();
+                return;
+            }
+            if (DrawSaga(d, scene, mirror))
+            {
                 if (mirror) d.Pop();
                 return;
             }
@@ -116,10 +117,10 @@ internal sealed class ActivityCharacter : FrameworkElement
                 Path("M9 37 Q5 29 15 29 L24 34 L21 38 Z", new Pen(Accent, 1.5), Accent);
                 Path("M23 34 Q31 24 40 35 L45 38 H22 Z", new Pen(Accent, 2), Accent);
                 DrawHead(d, 8, 8);
-                Path(scene < 16 ? "M20 29 L25 20 L20 13 M22 32 L29 24 L24 17" : "M20 29 L29 24 L39 20 M22 32 L31 27 L39 20");
+                Path(scene < 16 ? "M20 29 L10 22 L6 12 M22 32 L12 26 L8 15" : "M20 29 L29 24 L39 20 M22 32 L31 27 L39 20");
                 if (scene < 16)
                 {
-                    WorkBook.Draw(d, new Point(21, 16), .55, VisualTreeHelper.GetDpi(this).PixelsPerDip);
+                    WorkBook.Draw(d, new Point(7, 14), .55, VisualTreeHelper.GetDpi(this).PixelsPerDip);
                 }
                 if (mirror) d.Pop();
                 return;
@@ -258,28 +259,6 @@ internal sealed class ActivityCharacter : FrameworkElement
                 return;
             }
             bool furious = cycle >= 22.2 && cycle < 28.2;
-            if (cycle >= 13.5 && cycle < 16.2)
-            {
-                // A short stretch after ten swings, then back to the rock.
-                double stretch = Math.Sin((cycle - 13.5) / 2.7 * Math.PI);
-                Path("M5 44 H51", new Pen(Ground, 1));
-                Path("M36 43 L39 35 L46 34 L51 43 Z", new Pen(Ground, 1.5), Ground);
-                Path("M44 24 L50 42 M38 27 Q44 21 50 25", new Pen(Accent, 2));
-                d.PushTransform(new TranslateTransform(0, -stretch * 2));
-                DrawHead(d, 13, 9);
-                Path("M20 24 Q17 30 20 34 M20 34 L13 42 M20 34 L27 42");
-                // Interpolate both hands from the waist to an exaggerated overhead Y.
-                void Arm(double side)
-                {
-                    var shoulder = new Point(20, 25);
-                    var elbow = new Point(20 + side * (7 + stretch * 3), 28 - stretch * 14);
-                    var hand = new Point(20 + side * (10 + stretch * 4), 32 - stretch * 27);
-                    d.DrawLine(pen, shoulder, elbow); d.DrawLine(pen, elbow, hand);
-                }
-                Arm(-1); Arm(1);
-                d.Pop();
-                return;
-            }
             double swingDuration = furious ? .45 : 1.35;
             frame = (furious ? cycle - 22.2 : cycle) % swingDuration / swingDuration;
             double swing = frame < .65 ? frame / .65 : 1 - (frame - .65) / .35;

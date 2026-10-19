@@ -6,8 +6,8 @@ namespace WlyUsage;
 
 internal static class WorkBook
 {
-    private static readonly Brush Cover = new SolidColorBrush(Color.FromRgb(0x16, 0x35, 0x58));
-    private static readonly Brush Edge = new SolidColorBrush(Color.FromRgb(0x39, 0x58, 0x78));
+    private static readonly Brush Cover = new SolidColorBrush(Color.FromRgb(0x0b, 0x48, 0xa5));
+    private static readonly Brush Edge = new SolidColorBrush(Color.FromRgb(0x38, 0x78, 0xc9));
     private static readonly Brush Gold = new SolidColorBrush(Color.FromRgb(0xe3, 0xc4, 0x7b));
 
     // A miniature of the familiar blue paper work booklet, shared by hand and flight.
