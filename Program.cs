@@ -87,6 +87,7 @@ internal sealed class Island : Window
     private readonly bool preview;
     private bool hovering, expanded = true, dragging;
     private bool manuallyHidden;
+    private bool hiddenForIdle;
     private bool bothAgentsIdle;
     private readonly System.Diagnostics.Stopwatch idleWatch = new();
     private int phase;
@@ -422,21 +423,29 @@ internal sealed class Island : Window
         if (!force && (claudeState.Text.StartsWith("Trabalhando", StringComparison.Ordinal) || codexState.Text.StartsWith("Trabalhando", StringComparison.Ordinal))) return;
         expanded = false; AnimateOpacity(.35); SetTransparent(true);
     }
-    private void Reveal() { if (manuallyHidden || preferences.PresentationMode) return; Show(); Expand(); fade.Stop(); fade.Start(); }
+    private void Reveal() { if (manuallyHidden || hiddenForIdle || preferences.PresentationMode) return; Show(); Expand(); fade.Stop(); fade.Start(); }
     private void HidePanel() { manuallyHidden = true; hovering = false; fade.Stop(); ContextMenu?.SetCurrentValue(ContextMenu.IsOpenProperty, false); Hide(); }
     private void ShowManually()
     {
-        manuallyHidden = false; preferences.PresentationMode = false;
+        manuallyHidden = false; hiddenForIdle = false; preferences.PresentationMode = false;
         if (bothAgentsIdle) idleWatch.Restart();
         Save(); Reveal();
     }
     private void UpdateIdleVisibility(bool idle)
     {
         bothAgentsIdle = idle;
-        if (!idle) { idleWatch.Reset(); return; }
+        if (!idle)
+        {
+            idleWatch.Reset();
+            if (hiddenForIdle) { hiddenForIdle = false; Reveal(); }
+            return;
+        }
         if (!idleWatch.IsRunning) idleWatch.Start();
-        // Auto-hide uses the same latch as manual hiding: only the tray reopens it.
-        if (IsVisible && idleWatch.Elapsed >= TimeSpan.FromMinutes(5)) HidePanel();
+        if (IsVisible && idleWatch.Elapsed >= TimeSpan.FromMinutes(5))
+        {
+            hiddenForIdle = true; hovering = false; fade.Stop();
+            ContextMenu?.SetCurrentValue(ContextMenu.IsOpenProperty, false); Hide();
+        }
     }
     private void TogglePresentation()
     {
