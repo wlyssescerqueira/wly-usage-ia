@@ -14,7 +14,7 @@ internal sealed partial class ActivityCharacter
 
     private bool DrawSaga(DrawingContext d, double scene, bool mirrored)
     {
-        bool worker = Status.StartsWith("Trabalhando", StringComparison.Ordinal);
+        bool worker = EffectiveStatus.StartsWith("Trabalhando", StringComparison.Ordinal);
         if (worker ? scene < 17.5 : scene < 29) return false;
         var pen = new Pen(Ink, 2) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round, LineJoin = PenLineJoin.Round };
         void Path(string data, Brush? fill = null, Pen? stroke = null) => d.DrawGeometry(fill, stroke ?? pen, Geometry.Parse(data));
@@ -23,9 +23,9 @@ internal sealed partial class ActivityCharacter
             // Keep letters readable when the characters exchange left/right roles.
             var text = new FormattedText(value, CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
                 new Typeface("Segoe UI"), size, Ink, VisualTreeHelper.GetDpi(this).PixelsPerDip);
-            if (mirrored) d.PushTransform(new ScaleTransform(-1, 1, point.X + text.Width / 2, 0));
+            if (mirrored && worker) d.PushTransform(new ScaleTransform(-1, 1, point.X + text.Width / 2, 0));
             d.DrawText(text, point);
-            if (mirrored) d.Pop();
+            if (mirrored && worker) d.Pop();
         }
         if (worker)
         {
@@ -51,6 +51,9 @@ internal sealed partial class ActivityCharacter
         }
 
         // The defender gets up, puts on the cap, then lights a tire as the orb approaches.
+        // Keep the defender on the left and the burning tire on the screen-right,
+        // independent of the outer transform used for the earlier exchanges.
+        if (mirrored) d.PushTransform(new MatrixTransform(-1, 0, 0, 1, Width, 0));
         DrawHead(d, 9, 11);
         Path("M16 26 L20 34 L12 43 M20 34 L29 43 M16 27 L27 28 L35 23");
         double capDrop = scene < 30 ? (30 - scene) * 9 : 0;
@@ -75,6 +78,7 @@ internal sealed partial class ActivityCharacter
                 d.Pop();
             }
         }
+        if (mirrored) d.Pop();
         return true;
     }
 }

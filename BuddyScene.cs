@@ -9,16 +9,26 @@ using System.Windows.Media.Animation;
 
 namespace WlyUsage;
 
+internal sealed class ScenePlayback
+{
+    private readonly System.Diagnostics.Stopwatch watch = new();
+    public string WorkerName { get; private set; } = "Claude";
+    public double Phase => watch.IsRunning && watch.Elapsed.TotalSeconds < 41 ? watch.Elapsed.TotalSeconds : -1;
+    public void Start(string worker) { WorkerName = worker; watch.Restart(); }
+}
+
 // One shared timeline coordinates both characters and the projectile between cards.
 internal sealed class BuddyScene : FrameworkElement
 {
     private readonly Grid agents;
+    private readonly ScenePlayback playback;
     private static readonly DependencyProperty ClockProperty = DependencyProperty.Register(
         "Clock", typeof(double), typeof(BuddyScene), new FrameworkPropertyMetadata(0d, FrameworkPropertyMetadataOptions.AffectsRender));
     private static readonly Brush ToolInk = new SolidColorBrush(Color.FromRgb(0x84, 0x90, 0xff));
 
-    public BuddyScene(Grid agents)
+    public BuddyScene(Grid agents, ScenePlayback playback)
     {
+        this.playback = playback;
         this.agents = agents; IsHitTestVisible = false;
         Loaded += (_, _) => BeginAnimation(ClockProperty, new DoubleAnimation(0, 1, TimeSpan.FromSeconds(90))
         {
@@ -26,6 +36,14 @@ internal sealed class BuddyScene : FrameworkElement
             BeginTime = TimeSpan.FromSeconds(-(DateTimeOffset.UtcNow.TimeOfDay.TotalSeconds % 90))
         });
         Unloaded += (_, _) => BeginAnimation(ClockProperty, null);
+    }
+
+    public void Play()
+    {
+        var characters = Characters(agents).ToArray();
+        var worker = characters.FirstOrDefault(c => c.Status.StartsWith("Trabalhando", StringComparison.Ordinal)) ?? characters.FirstOrDefault();
+        if (worker != null) playback.Start(worker.AgentName);
+        InvalidateVisual();
     }
 
     private static IEnumerable<ActivityCharacter> Characters(DependencyObject root)
@@ -41,10 +59,19 @@ internal sealed class BuddyScene : FrameworkElement
     protected override void OnRender(DrawingContext drawing)
     {
         var characters = Characters(agents).ToArray();
+        double manualPhase = playback.Phase;
+        foreach (var character in characters)
+            character.SetPlaybackRole(manualPhase >= 0 ? character.AgentName == playback.WorkerName ? "Trabalhando" : "Sem atividade recente" : null);
         foreach (var character in characters) character.BuddyPhase = -1;
         var worker = characters.FirstOrDefault(c => c.Status.StartsWith("Trabalhando", StringComparison.Ordinal));
         var sleeper = characters.FirstOrDefault(c => c.Status == "Sem atividade recente");
         double phase = (double)GetValue(ClockProperty) * 90 - 42;
+        if (manualPhase >= 0)
+        {
+            phase = manualPhase;
+            worker = characters.FirstOrDefault(c => c.AgentName == playback.WorkerName);
+            sleeper = characters.FirstOrDefault(c => c != worker);
+        }
         // Fixed phases make the existing --preview useful for inspecting the whole scene.
         if (Environment.GetCommandLineArgs().Contains("--preview"))
         {

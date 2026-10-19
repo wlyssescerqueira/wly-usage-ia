@@ -15,7 +15,7 @@ internal static class SagaEffects
         double direction = worker.BuddyOnRight ? 1 : -1;
         var origin = worker.TranslatePoint(new Point(23, 19), (UIElement)surface);
         origin.X += direction * 42;
-        var wall = sleeper.TranslatePoint(new Point(sleeper.BuddyOnRight ? -4 : 60, 23), (UIElement)surface);
+        var wall = sleeper.TranslatePoint(new Point(sleeper.BuddyOnRight ? 60 : -4, 23), (UIElement)surface);
 
         if (phase >= 30 && phase < 40)
         {

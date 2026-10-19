@@ -81,6 +81,8 @@ internal sealed class Island : Window
     private readonly Preferences preferences;
     private readonly Button pin;
     private readonly Button hideButton;
+    private readonly Button playButton;
+    private readonly ScenePlayback scenePlayback = new();
     private readonly bool preview;
     private bool hovering, expanded = true, dragging;
     private bool manuallyHidden;
@@ -121,12 +123,20 @@ internal sealed class Island : Window
         root.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var controls = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 0, 0) };
         Grid.SetColumn(controls, 1); root.Children.Add(controls);
-        pin = IconAction("Fixar painel", "M16 3 21 8 17 9 14 12 14 16 12 18 6 12 8 10 12 10 15 7Z M9 15 3 21", TogglePin); controls.Children.Add(pin);
-        hideButton = IconAction("Ocultar na bandeja", "M4 12 H20", HidePanel); controls.Children.Add(hideButton);
+        var iconControls = new StackPanel { Orientation = Orientation.Horizontal }; controls.Children.Add(iconControls);
+        pin = IconAction("Fixar painel", "M16 3 21 8 17 9 14 12 14 16 12 18 6 12 8 10 12 10 15 7Z M9 15 3 21", TogglePin); iconControls.Children.Add(pin);
+        hideButton = IconAction("Ocultar na bandeja", "M4 12 H20", HidePanel); iconControls.Children.Add(hideButton);
+        playButton = Action("▶ Cena", PlayAnimation);
+        playButton.ToolTip = "Exibir a cena completa · Ctrl para a faixa não desviar · clique novamente para reiniciar";
+        System.Windows.Automation.AutomationProperties.SetName(playButton, "Exibir cena completa");
+        playButton.Width = 64; playButton.Height = 24; playButton.Foreground = Accent; playButton.Background = Wash;
+        controls.Children.Add(playButton);
         root.Children.Add(details);
         agents.ColumnDefinitions.Add(new()); agents.ColumnDefinitions.Add(new());
         if (!preview) { claudeState.Text = "Lendo dados locais…"; codexState.Text = "Lendo dados locais…"; }
         else codexState.Text = "Sem atividade recente";
+        if (preview && Environment.GetCommandLineArgs().Contains("--reverse-agents"))
+            (claudeState.Text, codexState.Text) = (codexState.Text, claudeState.Text);
         var left = Agent("Claude", preview ? "Conta A" : "Local", claudeState, preview ? 64 : null, preview ? 89 : null, preview ? "Renova em 37 min" : "Sem coleta");
         var right = Agent("Codex", preview ? "Plus" : "Local", codexState, preview ? 49 : null, preview ? 8 : null, preview ? "Renova em 1h22" : "Sem coleta");
         UpdateMatrix();
@@ -360,6 +370,7 @@ internal sealed class Island : Window
     {
         pin.Visibility = hovering || preferences.Pinned || IsKeyboardFocusWithin ? Visibility.Visible : Visibility.Hidden;
         hideButton.Visibility = hovering || IsKeyboardFocusWithin ? Visibility.Visible : Visibility.Hidden;
+        playButton.Visibility = Visibility.Visible;
     }
     private static Border AgentIcon(string name)
     {
@@ -396,6 +407,7 @@ internal sealed class Island : Window
     private void Expand() { details.Visibility = Visibility.Visible; expanded = true; SetTransparent(false); AnimateOpacity(1); }
     private void Collapse(bool force = false)
     {
+        if (!force && scenePlayback.Phase >= 0) { fade.Stop(); fade.Start(); return; }
         if (!force && (claudeState.Text.StartsWith("Trabalhando", StringComparison.Ordinal) || codexState.Text.StartsWith("Trabalhando", StringComparison.Ordinal))) return;
         expanded = false; AnimateOpacity(.35); SetTransparent(true);
     }
@@ -435,10 +447,15 @@ internal sealed class Island : Window
     {
         if (!agents.Children.OfType<BuddyScene>().Any())
         {
-            var scene = new BuddyScene(agents); Grid.SetColumnSpan(scene, 2);
+            var scene = new BuddyScene(agents, scenePlayback); Grid.SetColumnSpan(scene, 2);
             System.Windows.Controls.Panel.SetZIndex(scene, 10); agents.Children.Add(scene);
         }
         matrixBackground.SetWorking(claudeState.Text.StartsWith("Trabalhando", StringComparison.Ordinal) || codexState.Text.StartsWith("Trabalhando", StringComparison.Ordinal));
+    }
+    private void PlayAnimation()
+    {
+        agents.Children.OfType<BuddyScene>().FirstOrDefault()?.Play();
+        Expand(); fade.Stop(); fade.Start();
     }
     private async void RefreshLive()
     {

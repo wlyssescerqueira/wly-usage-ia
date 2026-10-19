@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Globalization;
 using System.Linq;
 using System.Windows;
@@ -22,6 +22,17 @@ internal sealed partial class ActivityCharacter : FrameworkElement
     public TextBlock? StatusLabel { get; init; }
     public double BuddyPhase { get; set; } = -1;
     public bool BuddyOnRight { get; set; }
+    private string? playbackRole;
+    private string EffectiveStatus => playbackRole ?? Status;
+    public void SetPlaybackRole(string? role)
+    {
+        if (playbackRole == role) return;
+        playbackRole = role;
+        bool visible = EffectiveStatus.StartsWith("Trabalhando", StringComparison.Ordinal) || EffectiveStatus == "Sem atividade recente";
+        Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        if (StatusLabel is { } label) label.Visibility = visible ? Visibility.Collapsed : Visibility.Visible;
+        InvalidateVisual();
+    }
     public string AgentName { get; init; } = "Codex";
     private static readonly Geometry ClaudeLogo = LoadLogo("claude");
     private static readonly Geometry CodexLogo = LoadLogo("openai");
@@ -63,7 +74,7 @@ internal sealed partial class ActivityCharacter : FrameworkElement
     private void Animate()
     {
         if (!IsLoaded || !IsVisible) { BeginAnimation(FrameProperty, null); return; }
-        double seconds = Status.StartsWith("Trabalhando", StringComparison.Ordinal) ? 32.4 : 12.8;
+        double seconds = EffectiveStatus.StartsWith("Trabalhando", StringComparison.Ordinal) ? 32.4 : 12.8;
         BeginAnimation(FrameProperty, new DoubleAnimation(0, 1, TimeSpan.FromSeconds(seconds))
         {
             RepeatBehavior = RepeatBehavior.Forever,
@@ -93,11 +104,11 @@ internal sealed partial class ActivityCharacter : FrameworkElement
         if (BuddyPhase >= 0)
         {
             // Mirror the entire interaction so either agent can be the instigator.
-            bool mirror = Status.StartsWith("Trabalhando", StringComparison.Ordinal) ? !BuddyOnRight : BuddyOnRight;
+            bool mirror = EffectiveStatus.StartsWith("Trabalhando", StringComparison.Ordinal) ? !BuddyOnRight : BuddyOnRight;
             if (mirror) d.PushTransform(new MatrixTransform(-1, 0, 0, 1, Width, 0));
             double scene = BuddyPhase;
             Path("M4 44 H51", new Pen(Ground, 1));
-            if (scene >= 16.55 && scene < 17.5 && Status.StartsWith("Trabalhando", StringComparison.Ordinal))
+            if (scene >= 16.55 && scene < 17.5 && EffectiveStatus.StartsWith("Trabalhando", StringComparison.Ordinal))
             {
                 double recoil = Math.Sin((scene - 16.55) / .95 * Math.PI);
                 d.PushTransform(new RotateTransform(-recoil * 30, 20, 40));
@@ -112,7 +123,7 @@ internal sealed partial class ActivityCharacter : FrameworkElement
                 if (mirror) d.Pop();
                 return;
             }
-            if (scene >= 14.5 && scene < 17 && Status == "Sem atividade recente")
+            if (scene >= 14.5 && scene < 17 && EffectiveStatus == "Sem atividade recente")
             {
                 Path("M9 37 Q5 29 15 29 L24 34 L21 38 Z", new Pen(Accent, 1.5), Accent);
                 Path("M23 34 Q31 24 40 35 L45 38 H22 Z", new Pen(Accent, 2), Accent);
@@ -125,7 +136,7 @@ internal sealed partial class ActivityCharacter : FrameworkElement
                 if (mirror) d.Pop();
                 return;
             }
-            if (scene >= 9 && Status.StartsWith("Trabalhando", StringComparison.Ordinal))
+            if (scene >= 9 && EffectiveStatus.StartsWith("Trabalhando", StringComparison.Ordinal))
             {
                 double shake = scene < 12 ? Math.Sin(scene * 45) * .7 : 0;
                 d.PushTransform(new TranslateTransform(shake, 0));
@@ -143,7 +154,7 @@ internal sealed partial class ActivityCharacter : FrameworkElement
                 if (mirror) d.Pop();
                 return;
             }
-            if (scene >= 12.25 && scene < 14.5 && Status == "Sem atividade recente")
+            if (scene >= 12.25 && scene < 14.5 && EffectiveStatus == "Sem atividade recente")
             {
                 double recoil = Math.Sin(Math.Min(1, (scene - 12.25) / .5) * Math.PI / 2);
                 d.PushTransform(new RotateTransform(-recoil * 25, 25, 36));
@@ -158,7 +169,7 @@ internal sealed partial class ActivityCharacter : FrameworkElement
                 if (mirror) d.Pop();
                 return;
             }
-            if (Status.StartsWith("Trabalhando", StringComparison.Ordinal))
+            if (EffectiveStatus.StartsWith("Trabalhando", StringComparison.Ordinal))
             {
                 double wipe = scene < 2 ? Math.Sin(scene * Math.PI * 2) * 2 : 0;
                 DrawHead(d, scene >= 2 ? 15 : 10, 6);
@@ -224,7 +235,7 @@ internal sealed partial class ActivityCharacter : FrameworkElement
             if (mirror) d.Pop();
             return;
         }
-        if (Status.StartsWith("Trabalhando", StringComparison.Ordinal))
+        if (EffectiveStatus.StartsWith("Trabalhando", StringComparison.Ordinal))
         {
             double cycle = frame * 32.4;
             if (cycle >= 16.2 && cycle < 22.2)
@@ -290,7 +301,7 @@ internal sealed partial class ActivityCharacter : FrameworkElement
                 d.Pop();
             }
         }
-        else if (Status == "Sem atividade recente")
+        else if (EffectiveStatus == "Sem atividade recente")
         {
             double cycle = frame * 12.8;
             frame = cycle % 3.2 / 3.2;
