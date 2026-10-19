@@ -44,9 +44,13 @@ internal static class QuietPlacement
         double right = area.Right - panel.Width - 12, bottom = area.Bottom - panel.Height - 12;
         if (right < left || bottom < top || width < 2 || height < 2) return null;
         Point? best = null; double bestScore = double.MaxValue;
-        for (int row = 0; row <= 8; row++) for (int column = 0; column <= 6; column++)
+        // Passos curtos no alto permitem descer abaixo de barras de título, abas e ferramentas.
+        var rows = Enumerable.Range(0, 9).Select(row => top + (bottom - top) * row / 8)
+            .Concat(new[] { 32d, 56d, 80d, 104d, 128d }.Select(offset => area.Top + offset))
+            .Where(y => y >= top && y <= bottom).Distinct().OrderBy(y => y);
+        foreach (double y in rows) for (int column = 0; column <= 6; column++)
             {
-                var candidate = new Rect(new Point(left + (right - left) * column / 6, top + (bottom - top) * row / 8), panel.Size);
+                var candidate = new Rect(new Point(left + (right - left) * column / 6, y), panel.Size);
                 var safe = candidate; safe.Inflate(64, 64);
                 if (safe.Contains(cursor)) continue;
                 // Evita avaliar o próprio painel se algum método de captura não respeitar a exclusão.
@@ -58,10 +62,11 @@ internal static class QuietPlacement
                 double density = EdgeDensity(gray, width, x0, y0, x1, y1, out double busiestTile);
                 // Uma região só é aceita se for homogênea inclusive nos pequenos blocos internos.
                 if (density > .065 || busiestTile > .24) continue;
-                // Primeiro as bordas aprovadas pela análise; o miolo só entra se nenhuma for segura.
-                // Entre bordas, mantém a escolha da região com menos conteúdo.
-                double edgePreference = row == 0 || row == 8 || column == 0 || column == 6 ? 0 : 1;
-                double score = density + busiestTile * .12 + edgePreference;
+                // Centro superior seguro primeiro, inclusive abaixo das barras do aplicativo.
+                // Depois as demais bordas; o miolo continua como alternativa.
+                bool upperCenter = column == 3 && y <= Math.Min(bottom, area.Top + 128);
+                double edgePreference = upperCenter ? 0 : y == top || y == bottom || column == 0 || column == 6 ? 1 : 2;
+                double score = density + busiestTile * .12 + edgePreference + (upperCenter ? (y - top) * .00001 : 0);
                 if (score < bestScore) { bestScore = score; best = candidate.TopLeft; }
             }
         return best;
@@ -108,5 +113,11 @@ internal static class QuietPlacement
         // Só uma faixa superior fica limpa: ela deve vencer o restante da tela.
         Array.Fill(noisy, (byte)220, 0, width * 45);
         if (Choose(noisy, width, height, area, panel, cursor)?.Y != area.Top + 12) throw new InvalidOperationException("Faixa vazia não priorizada");
+        // Barra superior ocupada: centraliza logo abaixo dela, em vez de ir para um canto.
+        var toolbar = Enumerable.Repeat((byte)220, width * height).ToArray();
+        for (int y = 0; y < 40; y++) for (int x = 0; x < width; x++) toolbar[y * width + x] = (byte)((x + y) % 2 * 255);
+        var belowToolbar = Choose(toolbar, width, height, area, panel, cursor) ?? throw new InvalidOperationException("Área abaixo da barra rejeitada");
+        if (belowToolbar.X != area.Left + (area.Width - panel.Width) / 2 || belowToolbar.Y < 96 || belowToolbar.Y > 128)
+            throw new InvalidOperationException("Centro abaixo da barra não priorizado");
     }
 }
