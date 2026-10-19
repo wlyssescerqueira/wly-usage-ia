@@ -59,6 +59,7 @@ internal sealed class Preferences
     public bool PresentationMode { get; set; }
     public bool DodgeMouse { get; set; } = true;
     public bool SmartPlacement { get; set; } = true;
+    public double FadePercent { get; set; } = 65;
     public bool AllowCapture { get; set; }
     public bool AllowCaptureWhileSnipping { get; set; } = true;
 }
@@ -103,6 +104,7 @@ internal sealed class Island : Window
     {
         this.preview = preview;
         preferences = ReadPreferences();
+        preferences.FadePercent = double.IsFinite(preferences.FadePercent) ? Math.Clamp(preferences.FadePercent, 0, 90) : 65;
         Title = "WLY Usage · protótipo";
         SizeToContent = SizeToContent.WidthAndHeight;
         WindowStyle = WindowStyle.None; ResizeMode = ResizeMode.NoResize;
@@ -421,7 +423,7 @@ internal sealed class Island : Window
     {
         if (!force && scenePlayback.Phase >= 0) { fade.Stop(); fade.Start(); return; }
         if (!force && (claudeState.Text.StartsWith("Trabalhando", StringComparison.Ordinal) || codexState.Text.StartsWith("Trabalhando", StringComparison.Ordinal))) return;
-        expanded = false; AnimateOpacity(.35); SetTransparent(true);
+        expanded = false; AnimateOpacity(1 - Math.Clamp(preferences.FadePercent, 0, 90) / 100); SetTransparent(true);
     }
     private void Reveal() { if (manuallyHidden || hiddenForIdle || preferences.PresentationMode) return; Show(); Expand(); fade.Stop(); fade.Start(); }
     private void HidePanel() { manuallyHidden = true; hovering = false; fade.Stop(); ContextMenu?.SetCurrentValue(ContextMenu.IsOpenProperty, false); Hide(); }
@@ -562,6 +564,19 @@ internal sealed class Island : Window
         Item(preferences.Pinned ? "Desafixar painel" : "Fixar painel", TogglePin);
         Item(preferences.PresentationMode ? "Encerrar modo apresentação" : "Modo apresentação · ocultar até voltar", TogglePresentation);
         Item("Atualizar dados locais", RefreshLive);
+        var fadeOptions = new StackPanel { Width = 270 };
+        var fadeLabel = Text($"Esmaecimento em repouso · {preferences.FadePercent:0}%", 14);
+        var fadeSlider = new Slider { Minimum = 0, Maximum = 90, TickFrequency = 5, IsSnapToTickEnabled = true, Value = preferences.FadePercent, Margin = new Thickness(0, 8, 0, 4), ToolTip = "0%: opaco · 90%: mais transparente" };
+        System.Windows.Automation.AutomationProperties.SetName(fadeSlider, "Esmaecimento em repouso, em porcentagem");
+        fadeSlider.ValueChanged += (_, _) =>
+        {
+            preferences.FadePercent = fadeSlider.Value;
+            fadeLabel.Text = $"Esmaecimento em repouso · {preferences.FadePercent:0}%";
+            AnimateOpacity(1 - preferences.FadePercent / 100);
+            Save();
+        };
+        fadeOptions.Children.Add(fadeLabel); fadeOptions.Children.Add(fadeSlider);
+        menu.Items.Add(new MenuItem { Header = fadeOptions, StaysOpenOnClick = true });
         Item(preferences.DodgeMouse ? "Desativar desvio do mouse" : "Ativar desvio do mouse · Ctrl para interagir", () => { preferences.DodgeMouse = !preferences.DodgeMouse; Save(); });
         Item(preferences.SmartPlacement ? "Desativar posicionamento inteligente (experimental)" : "Ativar posicionamento inteligente (experimental)", () => { preferences.SmartPlacement = !preferences.SmartPlacement; Save(); });
         Item("Copiar print da faixa", CopySnapshot);

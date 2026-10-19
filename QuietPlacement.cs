@@ -58,7 +58,9 @@ internal static class QuietPlacement
                 double density = EdgeDensity(gray, width, x0, y0, x1, y1, out double busiestTile);
                 // Uma região só é aceita se for homogênea inclusive nos pequenos blocos internos.
                 if (density > .065 || busiestTile > .24) continue;
-                double edgePreference = row == 0 ? 0 : column == 6 ? .002 : column == 0 ? .004 : row == 8 ? .006 : .018;
+                // Primeiro as bordas aprovadas pela análise; o miolo só entra se nenhuma for segura.
+                // Entre bordas, mantém a escolha da região com menos conteúdo.
+                double edgePreference = row == 0 || row == 8 || column == 0 || column == 6 ? 0 : 1;
                 double score = density + busiestTile * .12 + edgePreference;
                 if (score < bestScore) { bestScore = score; best = candidate.TopLeft; }
             }
@@ -91,9 +93,18 @@ internal static class QuietPlacement
         var position = Choose(blank, width, height, area, panel, cursor) ?? throw new InvalidOperationException("Área vazia rejeitada");
         var result = new Rect(position, panel.Size);
         if (!area.Contains(result) || result.Contains(cursor)) throw new InvalidOperationException("Posição insegura");
+        // Bordas levemente marcadas continuam preferíveis ao centro completamente vazio.
+        for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) blank[y * width + x] = (byte)(x % 100 == 0 ? 190 : 220);
+        for (int y = 100; y < 350; y++) for (int x = 150; x < 650; x++) blank[y * width + x] = 220;
+        var edge = Choose(blank, width, height, area, panel, cursor) ?? throw new InvalidOperationException("Bordas seguras rejeitadas");
+        if (edge.X != area.Left + 12 && edge.X != area.Right - panel.Width - 12 && edge.Y != area.Top + 12 && edge.Y != area.Bottom - panel.Height - 12)
+            throw new InvalidOperationException("Centro priorizado sobre borda segura");
         var noisy = new byte[width * height];
         for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) noisy[y * width + x] = (byte)((x + y) % 2 * 255);
         if (Choose(noisy, width, height, area, panel, cursor) != null) throw new InvalidOperationException("Área densa aceita");
+        var centerOnly = (byte[])noisy.Clone();
+        for (int y = 100; y < 350; y++) for (int x = 150; x < 650; x++) centerOnly[y * width + x] = 220;
+        if (Choose(centerOnly, width, height, area, panel, cursor) == null) throw new InvalidOperationException("Centro seguro rejeitado quando bordas estão ocupadas");
         // Só uma faixa superior fica limpa: ela deve vencer o restante da tela.
         Array.Fill(noisy, (byte)220, 0, width * 45);
         if (Choose(noisy, width, height, area, panel, cursor)?.Y != area.Top + 12) throw new InvalidOperationException("Faixa vazia não priorizada");
