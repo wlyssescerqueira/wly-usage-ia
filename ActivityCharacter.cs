@@ -22,6 +22,7 @@ internal sealed partial class ActivityCharacter : FrameworkElement
     public TextBlock? StatusLabel { get; init; }
     public double BuddyPhase { get; set; } = -1;
     public bool BuddyOnRight { get; set; }
+    public double? PlaybackWorkCycle { get; set; }
     private string? playbackRole;
     private string EffectiveStatus => playbackRole ?? Status;
     public void SetPlaybackRole(string? role)
@@ -237,7 +238,7 @@ internal sealed partial class ActivityCharacter : FrameworkElement
         }
         if (EffectiveStatus.StartsWith("Trabalhando", StringComparison.Ordinal))
         {
-            double cycle = frame * 32.4;
+            double cycle = PlaybackWorkCycle ?? frame * 32.4;
             if (cycle >= 16.2 && cycle < 22.2)
             {
                 // Throw, stomp over to the abandoned tool, then carry it back.

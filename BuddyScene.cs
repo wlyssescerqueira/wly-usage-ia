@@ -13,7 +13,7 @@ internal sealed class ScenePlayback
 {
     private readonly System.Diagnostics.Stopwatch watch = new();
     public string WorkerName { get; private set; } = "Claude";
-    public double Phase => watch.IsRunning && watch.Elapsed.TotalSeconds < 41 ? watch.Elapsed.TotalSeconds : -1;
+    public double Phase => watch.IsRunning && watch.Elapsed.TotalSeconds < 59 ? watch.Elapsed.TotalSeconds : -1;
     public void Start(string worker) { WorkerName = worker; watch.Restart(); }
 }
 
@@ -60,17 +60,25 @@ internal sealed class BuddyScene : FrameworkElement
     {
         var characters = Characters(agents).ToArray();
         double manualPhase = playback.Phase;
+        if (Environment.GetCommandLineArgs().Contains("--preview"))
+        {
+            var sampleArg = Environment.GetCommandLineArgs().FirstOrDefault(a => a.StartsWith("--playback-phase="));
+            if (sampleArg != null && double.TryParse(sampleArg.Split('=')[1], NumberStyles.Float, CultureInfo.InvariantCulture, out double sample)) manualPhase = sample;
+        }
         foreach (var character in characters)
             character.SetPlaybackRole(manualPhase >= 0 ? character.AgentName == playback.WorkerName ? "Trabalhando" : "Sem atividade recente" : null);
-        foreach (var character in characters) character.BuddyPhase = -1;
+        foreach (var character in characters) { character.BuddyPhase = -1; character.PlaybackWorkCycle = null; }
         var worker = characters.FirstOrDefault(c => c.Status.StartsWith("Trabalhando", StringComparison.Ordinal));
         var sleeper = characters.FirstOrDefault(c => c.Status == "Sem atividade recente");
         double phase = (double)GetValue(ClockProperty) * 90 - 42;
         if (manualPhase >= 0)
         {
-            phase = manualPhase;
+            // Play the original mining / tantrum / furious mining before the shared scene.
+            phase = manualPhase - 18;
             worker = characters.FirstOrDefault(c => c.AgentName == playback.WorkerName);
             sleeper = characters.FirstOrDefault(c => c != worker);
+            if (worker != null && manualPhase < 18)
+                worker.PlaybackWorkCycle = manualPhase < 6 ? manualPhase : manualPhase < 12 ? 16.2 + manualPhase - 6 : 22.2 + manualPhase - 12;
         }
         // Fixed phases make the existing --preview useful for inspecting the whole scene.
         if (Environment.GetCommandLineArgs().Contains("--preview"))

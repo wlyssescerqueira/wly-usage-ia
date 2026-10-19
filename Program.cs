@@ -81,6 +81,7 @@ internal sealed class Island : Window
     private readonly Preferences preferences;
     private readonly Button pin;
     private readonly Button hideButton;
+    private readonly StackPanel controls = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 0, 0) };
     private readonly Button playButton;
     private readonly ScenePlayback scenePlayback = new();
     private readonly bool preview;
@@ -121,16 +122,18 @@ internal sealed class Island : Window
         var root = new Grid(); layers.Children.Add(root);
         root.ColumnDefinitions.Add(new ColumnDefinition());
         root.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var controls = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 0, 0) };
         Grid.SetColumn(controls, 1); root.Children.Add(controls);
-        var iconControls = new StackPanel { Orientation = Orientation.Horizontal }; controls.Children.Add(iconControls);
-        pin = IconAction("Fixar painel", "M16 3 21 8 17 9 14 12 14 16 12 18 6 12 8 10 12 10 15 7Z M9 15 3 21", TogglePin); iconControls.Children.Add(pin);
-        hideButton = IconAction("Ocultar na bandeja", "M4 12 H20", HidePanel); iconControls.Children.Add(hideButton);
-        playButton = Action("▶ Cena", PlayAnimation);
+        pin = IconAction("Fixar painel", "M16 3 21 8 17 9 14 12 14 16 12 18 6 12 8 10 12 10 15 7Z M9 15 3 21", TogglePin); controls.Children.Add(pin);
+        hideButton = IconAction("Ocultar na bandeja", "M4 12 H20", HidePanel); controls.Children.Add(hideButton);
+        playButton = IconAction("Exibir cena completa", "M7 4 L20 12 L7 20 Z", PlayAnimation);
         playButton.ToolTip = "Exibir a cena completa · Ctrl para a faixa não desviar · clique novamente para reiniciar";
         System.Windows.Automation.AutomationProperties.SetName(playButton, "Exibir cena completa");
-        playButton.Width = 64; playButton.Height = 24; playButton.Foreground = Accent; playButton.Background = Wash;
         controls.Children.Add(playButton);
+        foreach (var control in new[] { pin, hideButton, playButton })
+        {
+            control.Height = 20; control.MinHeight = 20; control.Padding = new Thickness(8, 3, 8, 3);
+            if (control.Content is System.Windows.Shapes.Path glyph) { glyph.Width = 14; glyph.Height = 14; }
+        }
         root.Children.Add(details);
         agents.ColumnDefinitions.Add(new()); agents.ColumnDefinitions.Add(new());
         if (!preview) { claudeState.Text = "Lendo dados locais…"; codexState.Text = "Lendo dados locais…"; }
@@ -219,6 +222,7 @@ internal sealed class Island : Window
         live.Tick += (_, _) => RefreshLive();
         pointer.Tick += (_, _) =>
         {
+            UpdateControls();
             if (++pointerTicks % 3 == 0) CheckSnipping();
             if (TryDodge()) return;
             var p = Forms.Cursor.Position; var transform = PresentationSource.FromVisual(this)?.CompositionTarget?.TransformFromDevice ?? Matrix.Identity;
@@ -368,9 +372,14 @@ internal sealed class Island : Window
     }
     private void UpdateControls()
     {
-        pin.Visibility = hovering || preferences.Pinned || IsKeyboardFocusWithin ? Visibility.Visible : Visibility.Hidden;
-        hideButton.Visibility = hovering || IsKeyboardFocusWithin ? Visibility.Visible : Visibility.Hidden;
-        playButton.Visibility = Visibility.Visible;
+        bool held = ControlHeld();
+        var visibility = held ? Visibility.Visible : Visibility.Collapsed;
+        if (controls.Visibility == visibility) return;
+        controls.Visibility = visibility;
+        if (!IsLoaded || !IsVisible) return;
+        UpdateLayout(); ClampToScreen();
+        if (held) { SetTransparent(false); Expand(); fade.Stop(); }
+        else { fade.Stop(); fade.Start(); }
     }
     private static Border AgentIcon(string name)
     {
