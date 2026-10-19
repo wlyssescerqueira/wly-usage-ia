@@ -87,6 +87,8 @@ internal sealed class Island : Window
     private readonly bool preview;
     private bool hovering, expanded = true, dragging;
     private bool manuallyHidden;
+    private bool bothAgentsIdle;
+    private readonly System.Diagnostics.Stopwatch idleWatch = new();
     private int phase;
     private nint handle;
     private string? saveError;
@@ -422,7 +424,20 @@ internal sealed class Island : Window
     }
     private void Reveal() { if (manuallyHidden || preferences.PresentationMode) return; Show(); Expand(); fade.Stop(); fade.Start(); }
     private void HidePanel() { manuallyHidden = true; hovering = false; fade.Stop(); ContextMenu?.SetCurrentValue(ContextMenu.IsOpenProperty, false); Hide(); }
-    private void ShowManually() { manuallyHidden = false; preferences.PresentationMode = false; Save(); Reveal(); }
+    private void ShowManually()
+    {
+        manuallyHidden = false; preferences.PresentationMode = false;
+        if (bothAgentsIdle) idleWatch.Restart();
+        Save(); Reveal();
+    }
+    private void UpdateIdleVisibility(bool idle)
+    {
+        bothAgentsIdle = idle;
+        if (!idle) { idleWatch.Reset(); return; }
+        if (!idleWatch.IsRunning) idleWatch.Start();
+        // Auto-hide uses the same latch as manual hiding: only the tray reopens it.
+        if (IsVisible && idleWatch.Elapsed >= TimeSpan.FromMinutes(5)) HidePanel();
+    }
     private void TogglePresentation()
     {
         preferences.PresentationMode = !preferences.PresentationMode;
@@ -493,6 +508,7 @@ internal sealed class Island : Window
             }
             UpdateMatrix();
             if (wasWorking != readings.Any(entry => entry.Working)) Reveal();
+            UpdateIdleVisibility(!readings.Any(entry => entry.Working));
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException) { claudeState.Text = codexState.Text = "Fonte indisponível"; }
         finally { reading = false; }
